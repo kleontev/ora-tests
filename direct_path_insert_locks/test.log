@@ -1,0 +1,150 @@
+11:22:23 SQL> set lines 300
+11:22:23 SQL> set time off
+SQL> set timi off
+SQL> 
+SQL> select banner from v$version;
+
+BANNER
+--------------------------------------------------------------------------------
+Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production
+
+1 row selected.
+
+SQL> 
+SQL> drop table test_tab purge;
+
+Table dropped.
+
+SQL> drop table test_exch_part purge;
+
+Table dropped.
+
+SQL> 
+SQL> whenever sqlerror exit failure
+SQL> 
+SQL> create table test_tab (pkey date, val int)
+  2  partition by range (pkey)
+  3  (
+  4      partition p_20220101 values less than (date '2022-1-2'),
+  5      partition p_20220102 values less than (date '2022-1-3')
+  6  );
+
+Table created.
+
+SQL> 
+SQL> 
+SQL> insert /*+append*/ into test_tab
+  2  select date '2022-1-1' + mod(rownum, 2), rownum
+  3  from dual
+  4  connect by rownum <= 10;
+
+10 rows created.
+
+SQL> 
+SQL> create table test_exch_part as select * from test_tab partition (p_20220101);
+
+Table created.
+
+SQL> 
+SQL> -- 10704 deprecated since 12.2?
+SQL> alter session set events 'trace[ksq] disk medium';
+
+Session altered.
+
+SQL> 
+SQL> -- test 1: direct path insert with a partition specified
+SQL> -- expectation: mode 3 on table, mode 6 on partition
+SQL> alter session set tracefile_identifier = 'test_1_insert_append_part';
+
+Session altered.
+
+SQL> 
+SQL> insert /*+append*/ into test_tab partition for (date '2022-1-1')
+  2  select date '2022-1-1', rownum * 100 from dual connect by rownum <= 10;
+
+10 rows created.
+
+SQL> 
+SQL> commit;
+
+Commit complete.
+
+SQL> 
+SQL> -- test 2: direct path insert without partition specified
+SQL> -- expectation: mode 6 on table
+SQL> alter session set tracefile_identifier = 'test_2_insert_append_nopart';
+
+Session altered.
+
+SQL> insert /*+append*/ into test_tab
+  2  select date '2022-1-2', rownum from dual connect by rownum <= 10;
+
+10 rows created.
+
+SQL> 
+SQL> commit;
+
+Commit complete.
+
+SQL> 
+SQL> -- test 3:  move partition
+SQL> -- expectation: mode 6 on partition, mode 3 on table
+SQL> alter session set tracefile_identifier = 'test_3_move_part';
+
+Session altered.
+
+SQL> alter table test_tab move partition p_20220101;
+
+Table altered.
+
+SQL> 
+SQL> -- test 4: exchange partition
+SQL> -- expectation: mode 3 on table, mode 6 on partition
+SQL> alter session set tracefile_identifier = 'test_4_exch_part';
+
+Session altered.
+
+SQL> alter table test_tab exchange partition p_20220101 with table test_exch_part;
+
+Table altered.
+
+SQL> 
+SQL> break on trace_filename skip page duplicates
+SQL> 
+SQL> select
+  2      trc.trace_filename,
+  3      to_char(object_id,'0XXXXXXX') object_id_hex,
+  4      uo.object_name,
+  5      uo.subobject_name,
+  6      regexp_substr(trc.payload, 'mode=[0-9]') lock_mode,
+  7      trc.payload
+  8  from user_objects uo
+  9  join v$diag_trace_file_contents trc on 1 = 1
+ 10      and (trc.session_id, trc.serial#) = (select sid, serial# from v$session where sid = userenv('sid'))
+ 11      and trc.payload like '%TM-' || to_char(uo.object_id, 'FM0XXXXXXX') || '%'
+ 12  where uo.object_name = 'TEST_TAB'
+ 13  order by trc.timestamp;
+
+TRACE_FILENAME                                     OBJECT_ID OBJECT_NAME     SUBOBJECT_NAME  LOCK_MODE PAYLOAD
+-------------------------------------------------- --------- --------------- --------------- --------- ------------------------------------------------------------------------------------------------------------------------------------------------------
+ORCLCDB_ora_22566_test_1_insert_append_part.trc     000121C8 TEST_TAB                        mode=3    2022-06-06 04:22:20.211*:ksq.c@9175:ksqgtlctx(): *** TM-000121C8-00000000-989BDBE4-00000000 mode=3 flags=0x401 why=173 timeout=21474836 ***
+ORCLCDB_ora_22566_test_1_insert_append_part.trc     000121C9 TEST_TAB        P_20220101      mode=6    2022-06-06 04:22:20.211*:ksq.c@9175:ksqgtlctx(): *** TM-000121C9-00000000-989BDBE4-00000000 mode=6 flags=0x401 why=173 timeout=21474836 ***
+
+TRACE_FILENAME                                     OBJECT_ID OBJECT_NAME     SUBOBJECT_NAME  LOCK_MODE PAYLOAD
+-------------------------------------------------- --------- --------------- --------------- --------- ------------------------------------------------------------------------------------------------------------------------------------------------------
+ORCLCDB_ora_22566_test_2_insert_append_nopart.trc   000121C8 TEST_TAB                        mode=6    2022-06-06 04:22:20.238*:ksq.c@9175:ksqgtlctx(): *** TM-000121C8-00000000-989BDBE4-00000000 mode=6 flags=0x401 why=173 timeout=21474836 ***
+
+TRACE_FILENAME                                     OBJECT_ID OBJECT_NAME     SUBOBJECT_NAME  LOCK_MODE PAYLOAD
+-------------------------------------------------- --------- --------------- --------------- --------- ------------------------------------------------------------------------------------------------------------------------------------------------------
+ORCLCDB_ora_22566_test_3_move_part.trc              000121C8 TEST_TAB                        mode=3    2022-06-06 04:22:20.263*:ksq.c@9175:ksqgtlctx(): *** TM-000121C8-00000000-989BDBE4-00000000 mode=3 flags=0x401 why=173 timeout=0 ***
+ORCLCDB_ora_22566_test_3_move_part.trc              000121C9 TEST_TAB        P_20220101      mode=6    2022-06-06 04:22:20.263*:ksq.c@9175:ksqgtlctx(): *** TM-000121C9-00000000-989BDBE4-00000000 mode=6 flags=0x401 why=173 timeout=0 ***
+
+TRACE_FILENAME                                     OBJECT_ID OBJECT_NAME     SUBOBJECT_NAME  LOCK_MODE PAYLOAD
+-------------------------------------------------- --------- --------------- --------------- --------- ------------------------------------------------------------------------------------------------------------------------------------------------------
+ORCLCDB_ora_22566_test_4_exch_part.trc              000121C8 TEST_TAB                        mode=3    2022-06-06 04:22:20.317*:ksq.c@9175:ksqgtlctx(): *** TM-000121C8-00000000-989BDBE4-00000000 mode=3 flags=0x401 why=173 timeout=0 ***
+ORCLCDB_ora_22566_test_4_exch_part.trc              000121C9 TEST_TAB        P_20220101      mode=6    2022-06-06 04:22:20.317*:ksq.c@9175:ksqgtlctx(): *** TM-000121C9-00000000-989BDBE4-00000000 mode=6 flags=0x401 why=173 timeout=0 ***
+
+7 rows selected.
+
+SQL> 
+SQL> exit
