@@ -1,0 +1,36 @@
+17:11:14 SQL> 
+17:11:14 SQL> create table t(id, value) as select 1, 1 from dual;
+
+Table created.
+
+Elapsed: 00:00:00.23
+17:11:14 SQL> 
+17:11:14 SQL> update t set value = value + 1 where id = 1;
+
+1 row updated.
+
+Elapsed: 00:00:00.01
+17:11:14 SQL> 
+17:11:14 SQL> declare
+17:11:14   2      pragma autonomous_transaction;
+17:11:14   3  begin
+17:11:14   4      update t set value = value + 1 where id = 1;
+17:11:14   5      commit;
+17:11:14   6  end;
+17:11:14   7  /
+declare
+*
+ERROR at line 1:
+ORA-00060: deadlock detected while waiting for resource
+ORA-06512: at line 4
+
+
+Elapsed: 00:00:03.57
+17:11:18 SQL> 
+17:11:18 SQL> drop table t purge;
+
+Table dropped.
+
+Elapsed: 00:00:00.30
+17:11:18 SQL> 
+17:11:18 SQL> exit
