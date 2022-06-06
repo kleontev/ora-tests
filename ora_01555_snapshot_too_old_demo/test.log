@@ -1,0 +1,88 @@
+SQL> 
+SQL> drop table test_ora1555_demo purge;
+drop table test_ora1555_demo purge
+           *
+ERROR at line 1:
+ORA-00942: table or view does not exist
+
+
+Elapsed: 00:00:00.00
+SQL> 
+SQL> whenever sqlerror exit failure
+SQL> 
+SQL> create table test_ora1555_demo as select * from dual;
+
+Table created.
+
+Elapsed: 00:00:00.04
+SQL> 
+SQL> -- setting size to 100k forces Oracle to use system RBS, why?
+SQL> create undo tablespace tiny_undotbs datafile 'tiny_undotbs.dbf' size 500k;
+
+Tablespace created.
+
+Elapsed: 00:00:00.12
+SQL> 
+SQL> alter system set undo_tablespace = tiny_undotbs;
+
+System altered.
+
+Elapsed: 00:00:00.02
+SQL> 
+SQL> var cur refcursor
+SQL> 
+SQL> exec open :cur for select * from test_ora1555_demo;
+
+PL/SQL procedure successfully completed.
+
+Elapsed: 00:00:00.00
+SQL> 
+SQL> begin
+  2      for i in 1 .. 1e4 loop
+  3        update test_ora1555_demo
+  4        set dummy = to_char(mod(i, 10));
+  5        commit;
+  6      end loop;
+  7  end;
+  8  /
+
+PL/SQL procedure successfully completed.
+
+Elapsed: 00:00:01.61
+SQL> 
+SQL> whenever sqlerror continue
+SQL> 
+SQL> -- try to fetch data from previously opened cursor
+SQL> -- fails with ORA-01555
+SQL> print cur
+ERROR:
+ORA-01555: snapshot too old: rollback segment number 18 with name
+"_SYSSMU18_1823630118$" too small
+
+
+
+no rows selected
+
+Elapsed: 00:00:00.00
+SQL> 
+SQL> whenever sqlerror exit failure
+SQL> 
+SQL> alter system set undo_tablespace = undotbs1;
+
+System altered.
+
+Elapsed: 00:00:00.02
+SQL> 
+SQL> drop tablespace tiny_undotbs including contents and datafiles;
+
+Tablespace dropped.
+
+Elapsed: 00:00:00.12
+SQL> 
+SQL> drop table test_ora1555_demo purge;
+
+Table dropped.
+
+Elapsed: 00:00:00.03
+SQL> 
+SQL> exit
