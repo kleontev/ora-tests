@@ -1,3 +1,7 @@
+-- can we avoid exclusive TM lock on an entire table if we 
+-- perform a direct-path load into a specific partition 
+-- specified in an inline view? (spoiler: as of 19.3 - no)
+
 cl scr
 
 spool test.log replace
